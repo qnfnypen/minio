@@ -193,8 +193,9 @@ func extractMetadata(ctx context.Context, mimesHeader ...textproto.MIMEHeader) (
 // extractMetadata extracts metadata from map values.
 func extractMetadataFromMime(ctx context.Context, v textproto.MIMEHeader, m map[string]string) error {
 	if v == nil {
-		bugLogIf(ctx, errInvalidArgument)
-		return errInvalidArgument
+		// bugLogIf(ctx, errInvalidArgument)
+		// return errInvalidArgument
+		return nil
 	}
 
 	nv := make(textproto.MIMEHeader, len(v))

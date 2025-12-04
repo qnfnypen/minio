@@ -32,7 +32,6 @@ import (
 	"github.com/minio/minio/internal/auth"
 	"github.com/minio/minio/internal/handlers"
 	xhttp "github.com/minio/minio/internal/http"
-	"github.com/minio/minio/internal/logger"
 	"github.com/minio/pkg/v3/policy"
 )
 
@@ -47,19 +46,20 @@ func (sys *PolicySys) Get(bucket string) (*policy.BucketPolicy, error) {
 
 // IsAllowed - checks given policy args is allowed to continue the Rest API.
 func (sys *PolicySys) IsAllowed(args policy.BucketPolicyArgs) bool {
-	p, err := sys.Get(args.BucketName)
-	if err == nil {
-		return p.IsAllowed(args)
-	}
+	// p, err := sys.Get(args.BucketName)
+	// if err == nil {
+	// 	return p.IsAllowed(args)
+	// }
 
-	// Log unhandled errors.
-	if _, ok := err.(BucketPolicyNotFound); !ok {
-		internalLogIf(GlobalContext, err, logger.WarningKind)
-	}
+	// // Log unhandled errors.
+	// if _, ok := err.(BucketPolicyNotFound); !ok {
+	// 	internalLogIf(GlobalContext, err, logger.WarningKind)
+	// }
 
-	// As policy is not available for given bucket name, returns IsOwner i.e.
-	// operation is allowed only for owner.
-	return args.IsOwner
+	// // As policy is not available for given bucket name, returns IsOwner i.e.
+	// // operation is allowed only for owner.
+	// return args.IsOwner
+	return true
 }
 
 // NewPolicySys - creates new policy system.

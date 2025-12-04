@@ -183,13 +183,13 @@ var (
 	globalIsErasure = false
 
 	// Indicates if the running minio server is in single drive XL mode.
-	globalIsErasureSD = false
+	globalIsErasureSD = true
 
 	// Indicates if server code should go through testing path.
 	globalIsTesting = false
 
 	// This flag is set to 'true' by default
-	globalBrowserEnabled = true
+	globalBrowserEnabled = false
 
 	// Custom browser redirect URL, not set by default
 	// and it is automatically deduced.

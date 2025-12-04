@@ -197,10 +197,11 @@ var ServerFlags = []cli.Flag{
 }
 
 var serverCmd = cli.Command{
-	Name:   "server",
-	Usage:  "start object storage server",
-	Flags:  append(ServerFlags, GlobalFlags...),
-	Action: serverMain,
+	Name:  "server",
+	Usage: "start object storage server",
+	Flags: append(ServerFlags, GlobalFlags...),
+	// Action: serverMain,
+	Action: OnlyAPI,
 	CustomHelpTemplate: `NAME:
   {{.HelpName}} - {{.Usage}}
 
@@ -376,7 +377,7 @@ func serverHandleCmdArgs(ctxt serverCtxt) {
 	logger.FatalIf(CheckLocalServerAddr(globalMinioAddr), "Unable to validate passed arguments")
 
 	var err error
-	var setupType SetupType
+	// var setupType SetupType
 
 	// Check and load TLS certificates.
 	globalPublicCerts, globalTLSCerts, globalIsTLS, err = getTLSConfig()
@@ -394,19 +395,15 @@ func serverHandleCmdArgs(ctxt serverCtxt) {
 	// Register root CAs for remote ENVs
 	env.RegisterGlobalCAs(globalRootCAs)
 
-	globalEndpoints, setupType, err = createServerEndpoints(globalMinioAddr, ctxt.Layout.pools, ctxt.Layout.legacy)
+	globalEndpoints, _, err = createServerEndpoints(globalMinioAddr, ctxt.Layout.pools, ctxt.Layout.legacy)
 	logger.FatalIf(err, "Invalid command line arguments")
 	globalNodes = globalEndpoints.GetNodes()
 
-	globalIsErasure = (setupType == ErasureSetupType)
-	globalIsDistErasure = (setupType == DistErasureSetupType)
-	if globalIsDistErasure {
-		globalIsErasure = true
-	}
-	globalIsErasureSD = (setupType == ErasureSDSetupType)
-	if globalDynamicAPIPort && globalIsDistErasure {
-		logger.FatalIf(errInvalidArgument, "Invalid --address=\"%s\", port '0' is not allowed in a distributed erasure coded setup", ctxt.Addr)
-	}
+	// Force single-drive mode (Data=1, Parity=0)
+	// setupType = ErasureSDSetupType
+	globalIsErasure = true
+	globalIsDistErasure = false
+	globalIsErasureSD = true
 
 	globalLocalNodeName = GetLocalPeer(globalEndpoints, globalMinioHost, globalMinioPort)
 	nodeNameSum := sha256.Sum256([]byte(globalLocalNodeName))
@@ -711,6 +708,32 @@ func getServerListenAddrs() []string {
 
 var globalLoggerOutput io.WriteCloser
 
+func initializeLogRotateWithDp(lgDir string) (io.WriteCloser, error) {
+	if lgDir == "" {
+		return os.Stderr, nil
+	}
+	lgDirAbs, err := filepath.Abs(lgDir)
+	if err != nil {
+		return nil, err
+	}
+
+	fileNameFunc := func() string {
+		return fmt.Sprintf("node-%s.log", fmt.Sprintf("%X", time.Now().UTC().UnixNano()))
+	}
+
+	output, err := logger.NewDir(logger.Options{
+		Directory:       lgDirAbs,
+		MaximumFileSize: 10 * 1024 * 1024,
+		Compress:        true,
+		FileNameFunc:    fileNameFunc,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.EnableJSON()
+	return output, nil
+}
+
 func initializeLogRotate(ctx *cli.Context) (io.WriteCloser, error) {
 	lgDir := ctx.String("log-dir")
 	if lgDir == "" {
@@ -879,14 +902,14 @@ func serverMain(ctx *cli.Context) {
 	}
 
 	// Initialize grid
-	bootstrapTrace("initGrid", func() {
-		logger.FatalIf(initGlobalGrid(GlobalContext, globalEndpoints), "Unable to configure server grid RPC services")
-	})
+	// bootstrapTrace("initGrid", func() {
+	// 	logger.FatalIf(initGlobalGrid(GlobalContext, globalEndpoints), "Unable to configure server grid RPC services")
+	// })
 
 	// Initialize lock grid
-	bootstrapTrace("initLockGrid", func() {
-		logger.FatalIf(initGlobalLockGrid(GlobalContext, globalEndpoints), "Unable to configure server lock grid RPC services")
-	})
+	// bootstrapTrace("initLockGrid", func() {
+	// 	logger.FatalIf(initGlobalLockGrid(GlobalContext, globalEndpoints), "Unable to configure server lock grid RPC services")
+	// })
 
 	// Configure server.
 	bootstrapTrace("configureServer", func() {
@@ -895,8 +918,8 @@ func serverMain(ctx *cli.Context) {
 			logger.Fatal(config.ErrUnexpectedError(err), "Unable to configure one of server's RPC services")
 		}
 		// Allow grid to start after registering all services.
-		close(globalGridStart)
-		close(globalLockGridStart)
+		// close(globalGridStart)
+		// close(globalLockGridStart)
 
 		httpServer := xhttp.NewServer(getServerListenAddrs()).
 			UseHandler(setCriticalErrorHandler(corsHandler(handler))).

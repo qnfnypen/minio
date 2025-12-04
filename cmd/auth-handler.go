@@ -27,7 +27,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -122,38 +121,39 @@ const (
 
 // Get request authentication type.
 func getRequestAuthType(r *http.Request) (at authType) {
-	if r.URL != nil {
-		var err error
-		r.Form, err = url.ParseQuery(r.URL.RawQuery)
-		if err != nil {
-			authNLogIf(r.Context(), err)
-			return authTypeUnknown
-		}
-	}
-	if isRequestSignatureV2(r) {
-		return authTypeSignedV2
-	} else if isRequestPresignedSignatureV2(r) {
-		return authTypePresignedV2
-	} else if isRequestSignStreamingV4(r) {
-		return authTypeStreamingSigned
-	} else if isRequestSignStreamingTrailerV4(r) {
-		return authTypeStreamingSignedTrailer
-	} else if isRequestUnsignedTrailerV4(r) {
-		return authTypeStreamingUnsignedTrailer
-	} else if isRequestSignatureV4(r) {
-		return authTypeSigned
-	} else if isRequestPresignedSignatureV4(r) {
-		return authTypePresigned
-	} else if isRequestJWT(r) {
-		return authTypeJWT
-	} else if isRequestPostPolicySignatureV4(r) {
-		return authTypePostPolicy
-	} else if _, ok := r.Form[xhttp.Action]; ok {
-		return authTypeSTS
-	} else if _, ok := r.Header[xhttp.Authorization]; !ok {
-		return authTypeAnonymous
-	}
-	return authTypeUnknown
+	// if r.URL != nil {
+	// 	var err error
+	// 	r.Form, err = url.ParseQuery(r.URL.RawQuery)
+	// 	if err != nil {
+	// 		authNLogIf(r.Context(), err)
+	// 		return authTypeUnknown
+	// 	}
+	// }
+	// if isRequestSignatureV2(r) {
+	// 	return authTypeSignedV2
+	// } else if isRequestPresignedSignatureV2(r) {
+	// 	return authTypePresignedV2
+	// } else if isRequestSignStreamingV4(r) {
+	// 	return authTypeStreamingSigned
+	// } else if isRequestSignStreamingTrailerV4(r) {
+	// 	return authTypeStreamingSignedTrailer
+	// } else if isRequestUnsignedTrailerV4(r) {
+	// 	return authTypeStreamingUnsignedTrailer
+	// } else if isRequestSignatureV4(r) {
+	// 	return authTypeSigned
+	// } else if isRequestPresignedSignatureV4(r) {
+	// 	return authTypePresigned
+	// } else if isRequestJWT(r) {
+	// 	return authTypeJWT
+	// } else if isRequestPostPolicySignatureV4(r) {
+	// 	return authTypePostPolicy
+	// } else if _, ok := r.Form[xhttp.Action]; ok {
+	// 	return authTypeSTS
+	// } else if _, ok := r.Header[xhttp.Authorization]; !ok {
+	// 	return authTypeAnonymous
+	// }
+	// return authTypeUnknown
+	return authTypeAnonymous
 }
 
 func validateAdminSignature(ctx context.Context, r *http.Request, region string) (auth.Credentials, bool, APIErrorCode) {
@@ -520,19 +520,20 @@ func authorizeRequest(ctx context.Context, r *http.Request, action policy.Action
 // returns APIErrorCode if any to be replied to the client.
 // Additionally returns the accessKey used in the request, and if this request is by an admin.
 func checkRequestAuthTypeCredential(ctx context.Context, r *http.Request, action policy.Action) (cred auth.Credentials, owner bool, s3Err APIErrorCode) {
-	s3Err = authenticateRequest(ctx, r, action)
-	reqInfo := logger.GetReqInfo(ctx)
-	if reqInfo == nil {
-		return cred, owner, ErrAccessDenied
-	}
+	// s3Err = authenticateRequest(ctx, r, action)
+	// reqInfo := logger.GetReqInfo(ctx)
+	// if reqInfo == nil {
+	// 	return cred, owner, ErrAccessDenied
+	// }
 
-	cred = reqInfo.Cred
-	owner = reqInfo.Owner
-	if s3Err != ErrNone {
-		return cred, owner, s3Err
-	}
+	// cred = reqInfo.Cred
+	// owner = reqInfo.Owner
+	// if s3Err != ErrNone {
+	// 	return cred, owner, s3Err
+	// }
 
-	return cred, owner, authorizeRequest(ctx, r, action)
+	// return cred, owner, authorizeRequest(ctx, r, action)
+	return cred, true, ErrNone
 }
 
 // Verify if request has valid AWS Signature Version '2'.

@@ -18,20 +18,31 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log"
+	"math/rand"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/minio/cli"
 	"github.com/minio/minio/internal/color"
+	"github.com/minio/minio/internal/config"
+	xhttp "github.com/minio/minio/internal/http"
 	"github.com/minio/minio/internal/logger"
+	"github.com/minio/pkg/v3/certs"
 	"github.com/minio/pkg/v3/console"
 	"github.com/minio/pkg/v3/env"
 	"github.com/minio/pkg/v3/trie"
@@ -225,4 +236,197 @@ func Main(args []string) {
 	if err := newApp(appName).Run(args); err != nil {
 		os.Exit(1) //nolint:gocritic
 	}
+}
+
+// OnlyAPI 仅保留 S3 API 部分
+// 强制单盘模式，移除分布式锁与网络调用
+func OnlyAPI(ctx *cli.Context) {
+	// fmt.Printf("%#v", *ctx)
+	// var lgDir string
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	var warnings []string
+
+	// 基础信号与环境设置
+	signal.Notify(globalOSSignalCh, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	go handleSignals()
+	setDefaultProfilerRates()
+	// 日志系统初始化
+	bootstrapTrace("newConsoleLogger", func() {
+		// output, err := initializeLogRotateWithDp(lgDir)
+		output, err := initializeLogRotate(ctx)
+		if err == nil {
+			logger.Output = output
+			globalConsoleSys = NewConsoleLogger(GlobalContext, output)
+			globalLoggerOutput = output
+		} else {
+			logger.Output = os.Stderr
+			globalConsoleSys = NewConsoleLogger(GlobalContext, os.Stderr)
+		}
+		logger.AddSystemTarget(GlobalContext, globalConsoleSys)
+	})
+
+	// 构建服务上下文（解析参数，端口，磁盘布局）
+	bootstrapTrace("serverHandleCmdArgs", func() {
+		err := buildServerCtxt(ctx, &globalServerCtxt)
+		logger.FatalIf(err, "Unable to prepare the list of endpoints")
+
+		serverHandleCmdArgs(globalServerCtxt)
+	})
+
+	bootstrapTrace("initHelp", initHelp)
+
+	bootstrapTrace("initCoreSubsystems", func() {
+		// (A) 事件通知器 (Bucket 操作会触发，必须有，否则空指针)
+		globalEventNotifier = NewEventNotifier(GlobalContext)
+		// (B) 桶元数据系统 (必须有，否则无法识别 Bucket)
+		globalBucketMetadataSys = NewBucketMetadataSys()
+		// (C) 配置系统
+		globalConfigSys = NewConfigSys()
+		globalBucketTargetSys = NewBucketTargetSys(GlobalContext)
+	})
+
+	var getCert certs.GetCertificateFunc
+	if globalTLSCerts != nil {
+		getCert = globalTLSCerts.GetCertificate
+	}
+	// Set system resources to maximum.
+	bootstrapTrace("setMaxResources", func() {
+		_ = setMaxResources(globalServerCtxt)
+	})
+	// Verify kernel release and version.
+	if oldLinux() {
+		warnings = append(warnings, color.YellowBold("Detected Linux kernel version older than 4.0 release, there are some known potential performance problems with this kernel version. MinIO recommends a minimum of 4.x linux kernel version for best performance"))
+	}
+	maxProcs := runtime.GOMAXPROCS(0)
+	cpuProcs := runtime.NumCPU()
+	if maxProcs < cpuProcs {
+		warnings = append(warnings, color.YellowBold("Detected GOMAXPROCS(%d) < NumCPU(%d), please make sure to provide all PROCS to MinIO for optimal performance",
+			maxProcs, cpuProcs))
+	}
+
+	// Configure server.
+	bootstrapTrace("configureServer", func() {
+		// 仅注册 data api 和健康检查
+		handler, err := configureDataHandler()
+		if err != nil {
+			logger.Fatal(config.ErrUnexpectedError(err), "Unable to configure one of server's RPC services")
+		}
+
+		httpServer := xhttp.NewServer(getServerListenAddrs()).
+			UseHandler(setCriticalErrorHandler(corsHandler(handler))).
+			UseTLSConfig(newTLSConfig(getCert)).
+			UseIdleTimeout(globalServerCtxt.IdleTimeout).
+			UseReadTimeout(globalServerCtxt.IdleTimeout).
+			UseWriteTimeout(globalServerCtxt.IdleTimeout).
+			UseReadHeaderTimeout(globalServerCtxt.ReadHeaderTimeout).
+			UseBaseContext(GlobalContext).
+			UseCustomLogger(log.New(io.Discard, "", 0)). // Turn-off random logging by Go stdlib
+			UseTCPOptions(globalTCPOptions)
+
+		httpServer.TCPOptions.Trace = bootstrapTraceMsg
+		go func() {
+			serveFn, err := httpServer.Init(GlobalContext, func(listenAddr string, err error) {
+				bootLogIf(GlobalContext, fmt.Errorf("Unable to listen on `%s`: %v", listenAddr, err))
+			})
+			if err != nil {
+				globalHTTPServerErrorCh <- err
+				return
+			}
+			globalHTTPServerErrorCh <- serveFn()
+		}()
+
+		setHTTPServer(httpServer)
+	})
+	// 对象层初始化
+	var newObject ObjectLayer
+	bootstrapTrace("newObjectLayer", func() {
+		var err error
+		newObject, err = newObjectLayer(GlobalContext, globalEndpoints)
+		if err != nil {
+			logFatalErrs(err, Endpoint{}, true)
+		}
+	})
+
+	var err error
+	bootstrapTrace("initServerConfig", func() {
+		if err = initServerConfig(GlobalContext, newObject); err != nil {
+			var cerr config.Err
+			// For any config error, we don't need to drop into safe-mode
+			// instead its a user error and should be fixed by user.
+			if errors.As(err, &cerr) {
+				logger.FatalIf(err, "Unable to initialize the server")
+			}
+
+			// If context was canceled
+			if errors.Is(err, context.Canceled) {
+				logger.FatalIf(err, "Server startup canceled upon user request")
+			}
+
+			bootLogIf(GlobalContext, err)
+		}
+
+		if !globalServerCtxt.StrictS3Compat {
+			warnings = append(warnings, color.YellowBold("Strict AWS S3 compatible incoming PUT, POST content payload validation is turned off, caution is advised do not use in production"))
+		}
+	})
+
+	go func() {
+		// Initialize bucket notification system.
+		bootstrapTrace("initBucketTargets", func() {
+			bootLogIf(GlobalContext, globalEventNotifier.InitBucketTargets(GlobalContext, newObject))
+		})
+
+		var buckets []string
+		// List buckets to initialize bucket metadata sub-sys.
+		bootstrapTrace("listBuckets", func() {
+			for {
+				bucketsList, err := newObject.ListBuckets(GlobalContext, BucketOptions{NoMetadata: true})
+				if err != nil {
+					if configRetriableErrors(err) {
+						logger.Info("Waiting for list buckets to succeed to initialize buckets.. possible cause (%v)", err)
+						time.Sleep(time.Duration(r.Float64() * float64(time.Second)))
+						continue
+					}
+					bootLogIf(GlobalContext, fmt.Errorf("Unable to list buckets to initialize bucket metadata sub-system: %w", err))
+				}
+
+				buckets = make([]string, len(bucketsList))
+				for i := range bucketsList {
+					buckets[i] = bucketsList[i].Name
+				}
+				break
+			}
+		})
+
+		// 检查并创建默认 Bucket (例如 "default-bucket")
+		defaultBucketName := "default" // 你可以将其改为配置或环境变量
+		if !slices.Contains(buckets, defaultBucketName) {
+			// Bucket 不存在，创建它
+			err := newObject.MakeBucket(GlobalContext, defaultBucketName, MakeBucketOptions{})
+			if err != nil {
+				// 记录错误但不中断启动，除非这是致命的
+				logger.LogIf(GlobalContext, "", fmt.Errorf("Unable to create default bucket %s: %w", defaultBucketName, err))
+			} else {
+				logger.Info("Created default bucket: %s", defaultBucketName)
+				// 将新创建的 Bucket 添加到列表中，以便 Metadata 系统初始化它
+				buckets = append(buckets, defaultBucketName)
+			}
+		}
+
+		// Initialize bucket metadata sub-system.
+		bootstrapTrace("globalBucketMetadataSys.Init", func() {
+			globalBucketMetadataSys.Init(GlobalContext, buckets, newObject)
+		})
+
+		// Prints the formatted startup message, if err is not nil then it prints additional information as well.
+		printStartupMessage(getAPIEndpoints(), err)
+
+		for _, warn := range warnings {
+			logger.Warning(warn)
+		}
+	}()
+
+	daemon.SdNotify(false, daemon.SdNotifyReady)
+
+	<-globalOSSignalCh
 }

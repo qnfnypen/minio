@@ -353,6 +353,11 @@ func newErasureSets(ctx context.Context, endpoints PoolEndpoints, storageDisks [
 	setCount := len(format.Erasure.Sets)
 	setDriveCount := len(format.Erasure.Sets[0])
 
+	// Force single drive configuration
+	setCount = 1
+	setDriveCount = 1
+	defaultParityCount = 0
+
 	endpointStrings := make([]string, len(endpoints.Endpoints))
 	for i, endpoint := range endpoints.Endpoints {
 		endpointStrings[i] = endpoint.String()
@@ -476,9 +481,10 @@ func newErasureSets(ctx context.Context, endpoints PoolEndpoints, storageDisks [
 	go s.cleanupDeletedObjects(ctx)
 
 	// Start the disk monitoring and connect routine.
-	if !globalIsTesting {
-		go s.monitorAndConnectEndpoints(ctx, defaultMonitorConnectEndpointInterval)
-	}
+	// Disable endpoint monitoring for single drive mode
+	// if !globalIsTesting {
+	// 	go s.monitorAndConnectEndpoints(ctx, defaultMonitorConnectEndpointInterval)
+	// }
 
 	return s, nil
 }

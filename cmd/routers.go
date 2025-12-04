@@ -63,7 +63,7 @@ var globalMiddlewares = []mux.MiddlewareFunc{
 	// signatures.
 	//
 	// Validates all incoming requests to have a valid date header.
-	setAuthMiddleware,
+	// setAuthMiddleware,
 	// Redirect some pre-defined browser request paths to a static location
 	// prefix.
 	setBrowserRedirectMiddleware,
@@ -109,6 +109,25 @@ func configureServerHandler(endpointServerPools EndpointServerPools) (http.Handl
 	// Add API router
 	registerAPIRouter(router)
 
+	router.Use(globalMiddlewares...)
+
+	return router, nil
+}
+
+// 单盘单节点模式
+func configureDataHandler() (http.Handler, error) {
+	router := mux.NewRouter().SkipClean(true).UseEncodedPath()
+
+	// Add healthCheck router
+	registerHealthCheckRouter(router)
+
+	// Add API router
+	registerAPIRouter(router)
+
+	// 取消鉴权中间件：setAuthMiddleware
+	// 修改 cmd/auth-handler.go checkRequestAuthTypeCredential
+	// 修改 cmd/auth-handler.go globalPolicySys.IsAllowed
+	// 修改 cmd/handler-utils.go extractMetadataFromMime
 	router.Use(globalMiddlewares...)
 
 	return router, nil
