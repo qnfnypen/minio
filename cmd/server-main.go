@@ -902,14 +902,14 @@ func serverMain(ctx *cli.Context) {
 	}
 
 	// Initialize grid
-	// bootstrapTrace("initGrid", func() {
-	// 	logger.FatalIf(initGlobalGrid(GlobalContext, globalEndpoints), "Unable to configure server grid RPC services")
-	// })
+	bootstrapTrace("initGrid", func() {
+		logger.FatalIf(initGlobalGrid(GlobalContext, globalEndpoints), "Unable to configure server grid RPC services")
+	})
 
 	// Initialize lock grid
-	// bootstrapTrace("initLockGrid", func() {
-	// 	logger.FatalIf(initGlobalLockGrid(GlobalContext, globalEndpoints), "Unable to configure server lock grid RPC services")
-	// })
+	bootstrapTrace("initLockGrid", func() {
+		logger.FatalIf(initGlobalLockGrid(GlobalContext, globalEndpoints), "Unable to configure server lock grid RPC services")
+	})
 
 	// Configure server.
 	bootstrapTrace("configureServer", func() {
@@ -918,8 +918,8 @@ func serverMain(ctx *cli.Context) {
 			logger.Fatal(config.ErrUnexpectedError(err), "Unable to configure one of server's RPC services")
 		}
 		// Allow grid to start after registering all services.
-		// close(globalGridStart)
-		// close(globalLockGridStart)
+		close(globalGridStart)
+		close(globalLockGridStart)
 
 		httpServer := xhttp.NewServer(getServerListenAddrs()).
 			UseHandler(setCriticalErrorHandler(corsHandler(handler))).

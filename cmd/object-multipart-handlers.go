@@ -311,8 +311,12 @@ func (api objectAPIHandlers) CopyObjectPartHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	uploadID := r.Form.Get(xhttp.UploadID)
-	partIDString := r.Form.Get(xhttp.PartNumber)
+	// uploadID := r.Form.Get(xhttp.UploadID)
+	// partIDString := r.Form.Get(xhttp.PartNumber)
+	// Use r.URL.Query() directly to fetch query parameters.
+	query := r.URL.Query()
+	uploadID := query.Get(xhttp.UploadID)
+	partIDString := query.Get(xhttp.PartNumber)
 
 	partID, err := strconv.Atoi(partIDString)
 	if err != nil || partID <= 0 {
@@ -644,8 +648,13 @@ func (api objectAPIHandlers) PutObjectPartHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	uploadID := r.Form.Get(xhttp.UploadID)
-	partIDString := r.Form.Get(xhttp.PartNumber)
+	// uploadID := r.Form.Get(xhttp.UploadID)
+	// partIDString := r.Form.Get(xhttp.PartNumber)
+	// Workaround for potential r.Form not being populated or parsed correctly
+	// Use r.URL.Query() directly to fetch query parameters.
+	query := r.URL.Query()
+	uploadID := query.Get(xhttp.UploadID)
+	partIDString := query.Get(xhttp.PartNumber)
 
 	partID, err := strconv.Atoi(partIDString)
 	if err != nil || partID <= 0 {
@@ -936,7 +945,7 @@ func (api objectAPIHandlers) CompleteMultipartUploadHandler(w http.ResponseWrite
 	}
 
 	// Get upload id.
-	uploadID, _, _, _, s3Error := getObjectResources(r.Form)
+	uploadID, _, _, _, s3Error := getObjectResources(r.URL.Query())
 	if s3Error != ErrNone {
 		writeErrorResponse(ctx, w, errorCodes.ToAPIErr(s3Error), r.URL)
 		return
@@ -1129,7 +1138,7 @@ func (api objectAPIHandlers) AbortMultipartUploadHandler(w http.ResponseWriter, 
 		return
 	}
 
-	uploadID, _, _, _, s3Error := getObjectResources(r.Form)
+	uploadID, _, _, _, s3Error := getObjectResources(r.URL.Query())
 	if s3Error != ErrNone {
 		writeErrorResponse(ctx, w, errorCodes.ToAPIErr(s3Error), r.URL)
 		return
@@ -1173,7 +1182,7 @@ func (api objectAPIHandlers) ListObjectPartsHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
-	uploadID, partNumberMarker, maxParts, encodingType, s3Error := getObjectResources(r.Form)
+	uploadID, partNumberMarker, maxParts, encodingType, s3Error := getObjectResources(r.URL.Query())
 	if s3Error != ErrNone {
 		writeErrorResponse(ctx, w, errorCodes.ToAPIErr(s3Error), r.URL)
 		return

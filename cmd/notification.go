@@ -681,6 +681,9 @@ func (sys *NotificationSys) ReloadPoolMeta(ctx context.Context) {
 // DeleteUploadID notifies all the MinIO nodes to remove the
 // given uploadID from cache
 func (sys *NotificationSys) DeleteUploadID(ctx context.Context, uploadID string) {
+	if sys == nil {
+		return
+	}
 	ng := WithNPeers(len(sys.peerClients))
 	for idx, client := range sys.peerClients {
 		if client == nil {
