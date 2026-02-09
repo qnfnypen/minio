@@ -38,6 +38,7 @@ import (
 
 	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/minio/cli"
+	"github.com/minio/minio/internal/auth"
 	"github.com/minio/minio/internal/color"
 	"github.com/minio/minio/internal/config"
 	xhttp "github.com/minio/minio/internal/http"
@@ -275,6 +276,26 @@ func OnlyAPI(ctx *cli.Context) {
 
 	bootstrapTrace("initHelp", initHelp)
 
+	// 加载环境变量中的凭证
+	bootstrapTrace("loadEnvVarsFromFiles", loadEnvVarsFromFiles)
+	bootstrapTrace("serverHandleEnvVars", serverHandleEnvVars)
+
+	// 加载 root 凭证
+	bootstrapTrace("rootCredentials", func() {
+		cred := loadRootCredentials()
+		if !cred.IsValid() {
+			cred = auth.DefaultCredentials
+		}
+
+		var err error
+		globalNodeAuthToken, err = authenticateNode(cred.AccessKey, cred.SecretKey)
+		if err != nil {
+			logger.Fatal(err, "Unable to generate internode credentials")
+		}
+
+		globalActiveCred = cred
+	})
+
 	bootstrapTrace("initCoreSubsystems", func() {
 		// (A) 事件通知器 (Bucket 操作会触发，必须有，否则空指针)
 		globalEventNotifier = NewEventNotifier(GlobalContext)
@@ -282,6 +303,11 @@ func OnlyAPI(ctx *cli.Context) {
 		globalBucketMetadataSys = NewBucketMetadataSys()
 		// (C) 配置系统
 		globalConfigSys = NewConfigSys()
+		// (D) IAM 系统 (必须有，否则认证失败)
+		globalIAMSys = NewIAMSys()
+		// (E) 策略系统
+		globalPolicySys = NewPolicySys()
+		// (F) Bucket Target 系统
 		globalBucketTargetSys = NewBucketTargetSys(GlobalContext)
 	})
 
@@ -371,6 +397,11 @@ func OnlyAPI(ctx *cli.Context) {
 	})
 
 	go func() {
+		// Initialize IAM system (必须在后台初始化，否则会阻塞启动)
+		bootstrapTrace("globalIAMSys.Init", func() {
+			globalIAMSys.Init(GlobalContext, newObject, globalEtcdClient, globalRefreshIAMInterval)
+		})
+
 		// Initialize bucket notification system.
 		bootstrapTrace("initBucketTargets", func() {
 			bootLogIf(GlobalContext, globalEventNotifier.InitBucketTargets(GlobalContext, newObject))
