@@ -63,7 +63,7 @@ var globalMiddlewares = []mux.MiddlewareFunc{
 	// signatures.
 	//
 	// Validates all incoming requests to have a valid date header.
-	// setAuthMiddleware,
+	setAuthMiddleware,
 	// Redirect some pre-defined browser request paths to a static location
 	// prefix.
 	setBrowserRedirectMiddleware,
